@@ -415,7 +415,7 @@ __global__ void generate_grid_samples_nerf_uniform(Eigen::Vector3i res_3d, const
 	uint32_t z = threadIdx.z + blockIdx.z * blockDim.z;
 	if (x>=res_3d.x() || y>=res_3d.y() || z>=res_3d.z())
 		return;
-	uint32_t i = x+ y*res_3d.x() + z*res_3d.x()*res_3d.y();
+	uint32_t i = x + y*res_3d.x() + z*res_3d.x()*res_3d.y();
 	Vector3f pos = Array3f{(float)x, (float)y, (float)z} * Array3f{1.f/res_3d.x(),1.f/res_3d.y(),1.f/res_3d.z()};
 	pos = pos.cwiseProduct(render_aabb.max - render_aabb.min) + render_aabb.min;
 	out[i] = { warp_position(pos, train_aabb), warp_dt(MIN_CONE_STEPSIZE()) };
@@ -455,11 +455,15 @@ __global__ void generate_grid_samples_nerf_nonuniform(const uint32_t n_elements,
 	const uint32_t i = threadIdx.x + blockIdx.x * blockDim.x;
 	if (i >= n_elements) return;
 
+	// Super important:
 	// 1 random number to select the level, 3 to select the position.
 	rng.advance(i*4);
 	uint32_t level = (uint32_t)(random_val(rng) * n_cascades) % n_cascades;
 
-	// Select grid cell that has density
+	// Select grid cell that has DENSITY
+	// From comment:
+	// ...It's a linear congruential generator, which is a form of pseudo-random number generator. 
+	// Its statistical properties are somewhat bad, but it is very efficient...
 	uint32_t idx;
 	for (uint32_t j = 0; j < 10; ++j) {
 		idx = ((i+step*n_elements) * 56924617 + j * 19349663 + 96925573) % (NERF_GRIDSIZE()*NERF_GRIDSIZE()*NERF_GRIDSIZE());
@@ -469,9 +473,21 @@ __global__ void generate_grid_samples_nerf_nonuniform(const uint32_t n_elements,
 		}
 	}
 
-	// Random position within that cellq
+	// --> Random position WITHIN that cellq
+	// Why are we doing this in the first place?
+	// https://www.youtube.com/watch?v=0qKGZNXY44g
+	// Two approaches to deal with sparse containers
+	// 1) Octrees
+	// 2) Voxel hashing
+	// Tree structures emerges that allows us to significantly reduce our ray-casting range.
 	uint32_t pos_idx = idx % (NERF_GRIDSIZE()*NERF_GRIDSIZE()*NERF_GRIDSIZE());
 
+	// Morton no. is the linearization of 3D coordinates
+	// Child shares the same prefix with parents
+	// X=01;Y=11;Z=00 & Morton=010|011
+	// 010=Parent & 011=Child
+	// Allows for parallelization once we know which voxels have been allocated.
+	// No need for synchronization...
 	uint32_t x = tcnn::morton3D_invert(pos_idx>>0);
 	uint32_t y = tcnn::morton3D_invert(pos_idx>>1);
 	uint32_t z = tcnn::morton3D_invert(pos_idx>>2);
@@ -2367,6 +2383,7 @@ void Testbed::update_density_grid_nerf(float decay, uint32_t n_uniform_density_g
 
 	const uint32_t n_density_grid_samples = n_uniform_density_grid_samples + n_nonuniform_density_grid_samples;
 
+	// Defined in testbed.h (std::shared_ptr<NerfNetwork<precision_t>> m_nerf_network;)
 	const uint32_t padded_output_width = m_nerf_network->padded_density_output_width();
 
 	GPUMemoryArena::Allocation alloc;
@@ -2401,10 +2418,17 @@ void Testbed::update_density_grid_nerf(float decay, uint32_t n_uniform_density_g
 		}
 	}
 
-	uint32_t n_steps = 1;
+	uint32_t n_steps = 1; // Why is this only running for 1 step?
 	for (uint32_t i = 0; i < n_steps; ++i) {
+		// Make sure that the memory is assigned.
 		CUDA_CHECK_THROW(cudaMemsetAsync(density_grid_tmp, 0, sizeof(float)*n_elements, stream));
 
+		/* 
+		1.) generate_grid_samples_nerf_nonuniform
+		-  Determine level (cell value) and position (x,y,z - within cell) of all
+			positions that meet a certain density threshold in the grid
+		- This is done non-uniformly using a pseudo-random number generator 
+		*/
 		linear_kernel(generate_grid_samples_nerf_nonuniform, 0, stream,
 			n_uniform_density_grid_samples,
 			m_rng,
@@ -2431,16 +2455,47 @@ void Testbed::update_density_grid_nerf(float decay, uint32_t n_uniform_density_g
 		);
 		m_rng.advance();
 
+		/* 
+		2.) density_matrix
+		-  Define a 3D density matrix using the dimensions below
+			This matrix will be updated over a period of time
+		*/
 		GPUMatrix<network_precision_t, RM> density_matrix(mlp_out, padded_output_width, n_density_grid_samples);
+
+		/* 
+		3.) density_grid_position_matrix
+		-  Consists of the set of grid position that will be updated in conjunction with the density matrix
+		*/
 		GPUMatrix<float> density_grid_position_matrix((float*)density_grid_positions, sizeof(NerfPosition)/sizeof(float), n_density_grid_samples);
+
+		/* 
+		4.) density
+		-  Calculate the density from the nerf network
+		*/
+		// Inside nerF_network.h (void density(cudaStream_t stream...)
 		m_nerf_network->density(stream, density_grid_position_matrix, density_matrix, false);
 
+		/*
+		5.) splat_grid_samples_nerf_max_nearest_neighbor
+		-  Some sort of splatting operator that allows for the `merge` of points
+		*/
 		linear_kernel(splat_grid_samples_nerf_max_nearest_neighbor, 0, stream, n_density_grid_samples, density_grid_indices, mlp_out, density_grid_tmp, m_nerf.rgb_activation, m_nerf.density_activation);
+		
+		/*
+		6.) ema_grid_samples_nerf
+		- Maximum instead of EMA allows capture of very thin features.
+		   Basically, we want the grid cell turned on as soon as _ANYTHING_ visible is in there.
+		- Exponential movign average with decay for capturing thin features
+		*/
 		linear_kernel(ema_grid_samples_nerf, 0, stream, n_elements, decay, m_nerf.density_grid_ema_step, m_nerf.density_grid.data(), density_grid_tmp);
 
 		++m_nerf.density_grid_ema_step;
 	}
+	/*
+	7.) update_density_grid_mean_and_bitfield
+	-  
 
+	*/
 	update_density_grid_mean_and_bitfield(stream);
 }
 
@@ -2740,6 +2795,7 @@ void Testbed::train_nerf_step(uint32_t target_batch_size, uint32_t n_rays_per_ba
 	);
 
 	// TODO: C++17 structured binding
+	// destructuring in JS - :muscle:
 	uint32_t* ray_indices = std::get<0>(scratch);
 	Ray* rays = std::get<1>(scratch);
 	uint32_t* numsteps = std::get<2>(scratch);
