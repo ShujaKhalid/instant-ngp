@@ -1005,12 +1005,19 @@ __global__ void generate_training_samples_nerf(
 	const uint32_t i = threadIdx.x + blockIdx.x * blockDim.x;
 	if (i >= n_rays) return;
 
+	// image index here
 	uint32_t img = image_idx(i, n_rays, n_rays_total, n_training_images, cdf_img);
-
+	// mask indx here
+	// uint32_t = mask = ...
+	// Optical flow index here
+	// uint32_t = optical_flow = ... 
+	
 	rng.advance(i * N_MAX_RANDOM_SAMPLES_PER_RAY());
 	Vector2f xy = nerf_random_image_pos_training(rng, resolution, snap_to_pixel_centers, cdf_x_cond_y, cdf_y, cdf_res, img);
 
 	// Negative values indicate masked-away regions
+	// 	This is what we were attempting to do earlier. 
+	// 	Determine the values that are negative and can be excluded from the calculation 
 	if ((float)training_images[pixel_idx(xy, resolution, img)*4] < 0.0f) {
 		return;
 	}
@@ -1019,6 +1026,7 @@ __global__ void generate_training_samples_nerf(
 
 	float motionblur_time = random_val(rng);
 
+	// Get camera extrinsics
 	const Vector2f focal_length = metadata[img].focal_length;
 	const Vector2f principal_point = metadata[img].principal_point;
 	const Vector3f light_dir_warped = warp_direction(metadata[img].light_dir);
@@ -1029,6 +1037,7 @@ __global__ void generate_training_samples_nerf(
 	Ray ray;
 	if (rays_in) {
 		// Rays have been explicitly supplied. Read them.
+		// TODO: Figure out where these are extracted from...
 		ray = rays_in[pixel_idx(xy, resolution, img)];
 
 		/* DEBUG - compare the stored rays to the computed ones
@@ -1154,6 +1163,7 @@ __device__ LossAndGradient loss_and_gradient(const Vector3f& target, const Vecto
 		case ELossType::Huber:       return huber_loss(target, prediction, 0.1f) / 5.0f; break;
 		case ELossType::LogL1:       return log_l1_loss(target, prediction); break;
 		default: case ELossType::L2: return l2_loss(target, prediction); break;
+		// TODO: Add the NSFF losses here
 	}
 }
 
@@ -1199,6 +1209,15 @@ inline __device__ Array4f read_rgba(Vector2f pos, const Vector2i& resolution, ui
 	return read_val(image_pos(pos, resolution));
 }
 
+/*
+MIGHT BE THE MOST IMPORTANT FUNCTION HERE
+LOSS CALCULATIONS WILL HAPPEN HERE FOR NSFF
+(TODO)
+LOSSES: 
+	1) ...
+	2) ...
+	3) ...
+*/
 __global__ void compute_loss_kernel_train_nerf(
 	const uint32_t n_rays,
 	BoundingBox aabb,
@@ -2845,17 +2864,17 @@ void Testbed::train_nerf_step(uint32_t target_batch_size, uint32_t n_rays_per_ba
 
 	linear_kernel(generate_training_samples_nerf, 0, stream,
 		n_rays_per_batch,
-		m_aabb,
+		m_aabb, // Important
 		max_inference,
 		n_rays_total,
 		m_rng,
-		m_nerf.training.dataset.rays_data.data(),
+		m_nerf.training.dataset.rays_data.data(), // Important
 		ray_counter,
 		counter,
 		ray_indices,
 		rays,
 		numsteps,
-		PitchedPtr<NerfCoordinate>((NerfCoordinate*)coords, 1, 0, extra_stride),
+		PitchedPtr<NerfCoordinate>((NerfCoordinate*)coords, 1, 0, extra_stride), // Important
 		m_nerf.training.image_resolution,
 		m_nerf.training.n_images_for_training,
 		m_nerf.training.metadata_gpu.data(),
@@ -2873,14 +2892,23 @@ void Testbed::train_nerf_step(uint32_t target_batch_size, uint32_t n_rays_per_ba
 		sample_image_proportional_to_error ? m_nerf.training.error_map.cdf_img.data() : nullptr,
 		m_nerf.training.error_map.cdf_resolution,
 		m_nerf.training.near_distance,
-		m_nerf.training.dataset.images_data.data()
+		m_nerf.training.dataset.images_data.data() // Important
 	);
+
+	// Print out the training samples here
+	// What does the format look like?
+	// 1) m_nerf.training.dataset.rays_data.data()
+	// 2) PitchedPtr<NerfCoordinate>((NerfCoordinate*)coords, 1, 0, extra_stride)
+	// 3) m_nerf.training.dataset.images_data.data()
 
 	auto hg_enc = dynamic_cast<GridEncoding<network_precision_t>*>(m_encoding.get());
 	if (hg_enc) {
 		hg_enc->set_max_level_gpu(m_max_level_rand_training ? max_level : nullptr);
 	}
 
+	// This is actually inference in the forward direction.
+	// The results of tis function are used to calculate the loss in 
+	// subsequent steps
 	m_network->inference_mixed_precision(stream, coords_matrix, rgbsigma_matrix, false);
 
 	if (hg_enc) {
@@ -2937,6 +2965,7 @@ void Testbed::train_nerf_step(uint32_t target_batch_size, uint32_t n_rays_per_ba
 		m_nerf.training.optimize_exposure ? m_nerf.training.cam_exposure_gradient_gpu.data() : nullptr
 	);
 
+	// Why do we rollover 3 times?
 	fill_rollover_and_rescale<network_precision_t><<<n_blocks_linear(target_batch_size*padded_output_width), n_threads_linear, 0, stream>>>(
 		target_batch_size, padded_output_width, compacted_counter, dloss_dmlp_out
 	);
