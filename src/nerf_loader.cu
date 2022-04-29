@@ -189,6 +189,8 @@ NerfDataset load_nerf(const std::vector<filesystem::path>& jsonpaths, float shar
 	uint32_t mask_color = 0;
 
 	std::vector<void*> images;
+	std::vector<void*> images_mask;
+	std::vector<void*> images_flow;
 	std::vector<Ray*> rays;
 	if (transforms["camera"].is_array()) {
 		throw std::runtime_error{"hdf5 is no longer supported. please use the hdf52nerf.py conversion script"};
@@ -203,7 +205,14 @@ NerfDataset load_nerf(const std::vector<filesystem::path>& jsonpaths, float shar
 		}
 	);
 
+	tlog::success() << jsons;
+
 	result.n_images = 0;
+
+	// Go through each of the images and make sure that everything 
+	// is in the correct format
+	// - sharpness chack
+	// - location check
 	for (size_t i = 0; i < jsons.size(); ++i) {
 		auto& json = jsons[i];
 		fs::path basepath = jsonpaths[i].parent_path();
@@ -216,6 +225,9 @@ NerfDataset load_nerf(const std::vector<filesystem::path>& jsonpaths, float shar
 
 		float sharpness_discard_threshold = json.value("sharpness_discard_threshold", 0.0f); // Keep all by default
 
+		// frames.begin => first element
+		// frames.end => last element
+		// callback/operation
 		std::sort(frames.begin(), frames.end(), [](const auto& frame1, const auto& frame2) {
 			return frame1["file_path"] < frame2["file_path"];
 		});
@@ -229,7 +241,8 @@ NerfDataset load_nerf(const std::vector<filesystem::path>& jsonpaths, float shar
 			auto frames_copy = frames;
 			frames.clear();
 
-			// Kill blurrier frames than their neighbors
+			// Kill frames that are blurrier than their neighbors
+			// and dont meet a blurriness threshold
 			const int neighborhood_size = 3;
 			for (int i = 0; i < (int)frames_copy.size(); ++i) {
 				float mean_sharpness = 0.0f;
@@ -253,6 +266,8 @@ NerfDataset load_nerf(const std::vector<filesystem::path>& jsonpaths, float shar
 	}
 
 	images.resize(result.n_images, nullptr);
+	images_mask.resize(result.n_images, nullptr);
+	images_flow.resize(result.n_images, nullptr);
 	rays.resize(result.n_images, nullptr);
 	result.xforms.resize(result.n_images);
 	result.metadata.resize(result.n_images);
@@ -276,6 +291,7 @@ NerfDataset load_nerf(const std::vector<filesystem::path>& jsonpaths, float shar
 	BoundingBox cam_aabb;
 	for (size_t i = 0; i < jsons.size(); ++i) {
 		auto& json = jsons[i];
+		tlog::info() << "i=" << i;
 
 		fs::path basepath = jsonpaths[i].parent_path();
 		std::string jp = jsonpaths[i].str();
@@ -451,6 +467,11 @@ NerfDataset load_nerf(const std::vector<filesystem::path>& jsonpaths, float shar
 			size_t i_img = i + image_idx;
 			auto& frame = json["frames"][i];
 
+			// TODO: Add condition for mask and optical flow information as well.
+			// TODO: Hot to deal with the situation when this is to be inferred on the fly?
+			auto& frame_mask = json["frames"][i];
+			auto& frame_flow = json["frames"][i];
+
 			std::string json_provided_path(frame["file_path"]);
 			if (json_provided_path == "") {
 				char buf[256];
@@ -459,6 +480,25 @@ NerfDataset load_nerf(const std::vector<filesystem::path>& jsonpaths, float shar
 			}
 			fs::path path = basepath / json_provided_path;
 
+			// Mask
+			std::string json_provided_path_mask(frame_mask["file_path"]);
+			if (json_provided_path_mask == "") {
+				char buf[256];
+				snprintf(buf, 256, "%s_%03d/rgba.png", part_after_underscore.c_str(), (int)i);
+				json_provided_path_mask = buf;
+			}
+			fs::path path_mask = basepath / json_provided_path_mask;
+
+			// Flow
+			std::string json_provided_path_flow(frame_flow["file_path"]);
+			if (json_provided_path_flow == "") {
+				char buf[256];
+				snprintf(buf, 256, "%s_%03d/rgba.png", part_after_underscore.c_str(), (int)i);
+				json_provided_path_flow = buf;
+			}
+			fs::path path_flow = basepath / json_provided_path_flow;
+
+			// Path matching
 			if (path.extension() == "") {
 				path = path.with_extension("png");
 				if (!path.exists()) {
@@ -468,9 +508,29 @@ NerfDataset load_nerf(const std::vector<filesystem::path>& jsonpaths, float shar
 					throw std::runtime_error{ "Could not find image file: " + path.str()};
 				}
 			}
+			if (path_mask.extension() == "") {
+				path_mask = path_mask.with_extension("png");
+				if (!path_mask.exists()) {
+					path_mask = path_mask.with_extension("exr");
+				}
+				if (!path_mask.exists()) {
+					throw std::runtime_error{ "Could not find image file: " + path_mask.str()};
+				}
+			}
+			if (path_flow.extension() == "") {
+				path_flow = path_flow.with_extension("png");
+				if (!path_flow.exists()) {
+					path_flow = path_flow.with_extension("exr");
+				}
+				if (!path_flow.exists()) {
+					throw std::runtime_error{ "Could not find image file: " + path_flow.str()};
+				}
+			}
 			Vector2i res = Vector2i::Zero();
 			int comp = 0;
 			if (equals_case_insensitive(path.extension(), "exr")) {
+				// TODO: acccount for this condition
+				// Unlikely to happen in the near term
 				images[i_img] = load_exr_to_gpu(&res.x(), &res.y(), path.str().c_str(), fix_premult);
 
 				if (image_type != ImageDataType::None && image_type != ImageDataType::Half) {
@@ -482,6 +542,8 @@ NerfDataset load_nerf(const std::vector<filesystem::path>& jsonpaths, float shar
 				result.is_hdr = true;
 			} else {
 				uint8_t* img = stbi_load(path.str().c_str(), &res.x(), &res.y(), &comp, 4);
+				uint8_t* img_mask = stbi_load(path_mask.str().c_str(), &res.x(), &res.y(), &comp, 4);
+				uint8_t* img_flow = stbi_load(path_flow.str().c_str(), &res.x(), &res.y(), &comp, 4);
 
 				fs::path alphapath = basepath / (std::string{frame["file_path"]} + ".alpha."s + path.extension());
 				if (alphapath.exists()) {
@@ -501,6 +563,8 @@ NerfDataset load_nerf(const std::vector<filesystem::path>& jsonpaths, float shar
 				}
 
 				fs::path maskpath = path.parent_path()/(std::string{"dynamic_mask_"} + path.basename() + ".png");
+				tlog::success() << "Alpha Path: " << alphapath;
+				tlog::success() << "Mask Path:  " << maskpath;
 				if (maskpath.exists()) {
 					int wa=0,ha=0;
 					uint8_t* mask_img = stbi_load(maskpath.str().c_str(), &wa, &ha, &comp, 4);
@@ -520,6 +584,9 @@ NerfDataset load_nerf(const std::vector<filesystem::path>& jsonpaths, float shar
 				}
 
 				images[i_img] = img;
+				// Assign the nsff data here
+				images_mask[i_img] = img_mask;
+				images_flow[i_img] = img_flow;
 
 				if (image_type != ImageDataType::None && image_type != ImageDataType::Byte) {
 					throw std::runtime_error{ "May not mix png and exr images." };
@@ -535,6 +602,7 @@ NerfDataset load_nerf(const std::vector<filesystem::path>& jsonpaths, float shar
 				throw std::runtime_error{ "training images are not all the same size" };
 			}
 
+			// TODO: how is the format of these rays determined?
 			fs::path rayspath = path.parent_path()/(std::string{"rays_"} + path.basename() + ".dat");
 			if (enable_ray_loading && rayspath.exists()) {
 				has_rays = true;
@@ -573,6 +641,8 @@ NerfDataset load_nerf(const std::vector<filesystem::path>& jsonpaths, float shar
 
 			result.image_resolution = res;
 
+			// [&] Capture variable by reference
+			// [=] Capture variable by value
 			auto read_focal_length = [&](int resolution, const std::string& axis) {
 				if (frame.contains(axis + "_fov")) {
 					return fov_to_focal_length(resolution, (float)frame[axis + "_fov"]);

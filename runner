@@ -2,6 +2,8 @@
 
 if [[ $1 == "--train" ]] 
 then 
+	cmake . -B build &&
+	cmake --build build --config RelWithDebInfo -j 16 && 	
 	./build/testbed --scene data/nerf/cholec80/
 elif [[ $1 == "--colmap" ]]
 then
