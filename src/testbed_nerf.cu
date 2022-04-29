@@ -2303,10 +2303,12 @@ void Testbed::load_nerf() {
 		} else {
 			throw std::runtime_error{"NeRF data path must either be a json file or a directory containing json files."};
 		}
-
+		
+		// Reference to nerf_loader.cu file made here
 		m_nerf.training.dataset = ngp::load_nerf(json_paths, m_nerf.sharpen);
 	}
 
+	// Make changes on-the-fly as required
 	m_nerf.rgb_activation = m_nerf.training.dataset.is_hdr ? ENerfActivation::Exponential : ENerfActivation::Logistic;
 
 	m_nerf.training.image_resolution = m_nerf.training.dataset.image_resolution;
