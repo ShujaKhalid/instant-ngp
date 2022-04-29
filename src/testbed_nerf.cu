@@ -2305,6 +2305,7 @@ void Testbed::load_nerf() {
 		}
 		
 		// Reference to nerf_loader.cu file made here
+		// DATASET ASSIGNMENT
 		m_nerf.training.dataset = ngp::load_nerf(json_paths, m_nerf.sharpen);
 	}
 
@@ -2909,8 +2910,8 @@ void Testbed::train_nerf_step(uint32_t target_batch_size, uint32_t n_rays_per_ba
 	}
 
 	// This is actually inference in the forward direction.
-	// The results of tis function are used to calculate the loss in 
-	// subsequent steps
+	// The results of this function are used to calculate
+	// the loss in subsequent steps
 	m_network->inference_mixed_precision(stream, coords_matrix, rgbsigma_matrix, false);
 
 	if (hg_enc) {
