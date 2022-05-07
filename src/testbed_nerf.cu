@@ -970,6 +970,7 @@ inline __device__ uint64_t pixel_idx(const Vector2f& xy, const Vector2i& resolut
 	return pixel_idx(image_pos(xy, resolution), resolution, img);
 }
 
+// CUDA kernel runs for each ray in parallel
 __global__ void generate_training_samples_nerf(
 	const uint32_t n_rays,
 	BoundingBox aabb,
@@ -1007,6 +1008,7 @@ __global__ void generate_training_samples_nerf(
 
 	// image index here
 	uint32_t img = image_idx(i, n_rays, n_rays_total, n_training_images, cdf_img);
+	// TODO
 	// mask indx here
 	// uint32_t = mask = ...
 	// Optical flow index here
@@ -1357,6 +1359,25 @@ __global__ void compute_loss_kernel_train_nerf(
 		}
 	}
 
+	// TODO: The python code also has  
+	//	- linear_to_srgb
+	// This is used to calculate the losses
+
+
+	/*
+		Required (NSFF):
+		- NOTE: No disparity map included here :(
+			- raw_rgb: Estimated RGB color of a ray. Comes from fine model.
+			- raw_alpha: Accumulated opacity along each ray. Comes from fine model.
+			- raw_rgb_rigid: Not required here (Will assume no rigid loss)
+			- raw_alpha_rigid: Not required here (Will assume no rigid loss)
+			- raw_sf_ref2prev: sf = nn.functional.tanh(self.sf_linear(h)) Look at NSFF paper
+			- raw_sf_ref2post: sf = nn.functional.tanh(self.sf_linear(h)) Look at NSFF paper
+				- NOTE: NeRF and NSFF architectures are different model change has to be made here.
+			- pts_ref: Points along the ray?
+			- z_vals: Distance along the ray for each sample
+	*/
+
 	if (compacted_numsteps == numsteps) {
 		// support arbitrary background colors
 		rgb_ray += T * background_color;
@@ -1453,6 +1474,7 @@ __global__ void compute_loss_kernel_train_nerf(
 		tcnn::vector_t<tcnn::network_precision_t, 4> local_dL_doutput;
 
 		// chain rule to go from dloss/drgb to dloss/dmlp_output
+		// vvmimp
 		local_dL_doutput[0] = loss_scale * (dloss_by_drgb.x() * network_to_rgb_derivative(local_network_output[0], rgb_activation) + fmaxf(0.0f, output_l2_reg * (float)local_network_output[0])); // Penalize way too large color values
 		local_dL_doutput[1] = loss_scale * (dloss_by_drgb.y() * network_to_rgb_derivative(local_network_output[1], rgb_activation) + fmaxf(0.0f, output_l2_reg * (float)local_network_output[1]));
 		local_dL_doutput[2] = loss_scale * (dloss_by_drgb.z() * network_to_rgb_derivative(local_network_output[2], rgb_activation) + fmaxf(0.0f, output_l2_reg * (float)local_network_output[2]));
@@ -2533,6 +2555,8 @@ void Testbed::update_density_grid_mean_and_bitfield(cudaStream_t stream) {
 
 	linear_kernel(grid_to_bitfield, 0, stream, n_elements/8 * NERF_CASCADES(), m_nerf.density_grid.data(), m_nerf.density_grid_bitfield.data(), m_nerf.density_grid_mean.data());
 
+	// The number of levels that you are going through 
+	// with different dimensions to parse the data
 	for (uint32_t level = 1; level < NERF_CASCADES(); ++level) {
 		linear_kernel(bitfield_max_pool, 0, stream, n_elements/64, m_nerf.get_density_grid_bitfield_mip(level-1), m_nerf.get_density_grid_bitfield_mip(level));
 	}
