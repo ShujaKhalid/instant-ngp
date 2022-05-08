@@ -1364,26 +1364,26 @@ __global__ void compute_loss_kernel_train_nerf(
 	// This is used to calculate the losses
 	//tlog::info() << "Training in progress...";
 	// DEBUGGING...
-	# if __CUDA_ARCH__>=200
-		printf("\n %s \n", "Print rgbtarget");
-		for (uint32_t j = 0; j < rgbtarget.size(); ++j) {
-			if (j==sizeof(rgbtarget)-1) {
-				printf("%f \n", rgbtarget[j]);
-			} else {
-				printf("%f,", rgbtarget[j]);
-			}
-		}
-		printf("\n %s \n", "Print texsamp");
-		for (uint32_t k = 0; k < texsamp.size(); ++k) {
-			if (k==sizeof(texsamp)-1) {
-				printf("%f \n", texsamp[k]);
-			} else {
-				printf("%f,", texsamp[k]);
-			}
-		}
-		// printf("rgbtarget: %d \n", rgbtarget);
-		printf("texsamp.size(): %d \n", texsamp.size());
-	# endif  
+	// # if __CUDA_ARCH__>=200
+	// 	printf("\n %s \n", "Print rgbtarget");
+	// 	for (uint32_t j = 0; j < rgbtarget.size(); ++j) {
+	// 		if (j==sizeof(rgbtarget)-1) {
+	// 			printf("%f \n", rgbtarget[j]);
+	// 		} else {
+	// 			printf("%f,", rgbtarget[j]);
+	// 		}
+	// 	}
+	// 	printf("\n %s \n", "Print texsamp");
+	// 	for (uint32_t k = 0; k < texsamp.size(); ++k) {
+	// 		if (k==sizeof(texsamp)-1) {
+	// 			printf("%f \n", texsamp[k]);
+	// 		} else {
+	// 			printf("%f,", texsamp[k]);
+	// 		}
+	// 	}
+	// 	// printf("rgbtarget: %d \n", rgbtarget);
+	// 	printf("texsamp.size(): %d \n", texsamp.size());
+	// # endif  
 
 	/*
 		Required (NSFF):
