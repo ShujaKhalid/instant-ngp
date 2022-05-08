@@ -1362,15 +1362,36 @@ __global__ void compute_loss_kernel_train_nerf(
 	// TODO: The python code also has  
 	//	- linear_to_srgb
 	// This is used to calculate the losses
-
+	//tlog::info() << "Training in progress...";
+	// DEBUGGING...
+	# if __CUDA_ARCH__>=200
+		printf("\n %s \n", "Print rgbtarget");
+		for (uint32_t j = 0; j < rgbtarget.size(); ++j) {
+			if (j==sizeof(rgbtarget)-1) {
+				printf("%f \n", rgbtarget[j]);
+			} else {
+				printf("%f,", rgbtarget[j]);
+			}
+		}
+		printf("\n %s \n", "Print texsamp");
+		for (uint32_t k = 0; k < texsamp.size(); ++k) {
+			if (k==sizeof(texsamp)-1) {
+				printf("%f \n", texsamp[k]);
+			} else {
+				printf("%f,", texsamp[k]);
+			}
+		}
+		// printf("rgbtarget: %d \n", rgbtarget);
+		printf("texsamp.size(): %d \n", texsamp.size());
+	# endif  
 
 	/*
 		Required (NSFF):
 		- NOTE: No disparity map included here :(
 			- raw_rgb: Estimated RGB color of a ray. Comes from fine model.
 			- raw_alpha: Accumulated opacity along each ray. Comes from fine model.
-			- raw_rgb_rigid: Not required here (Will assume no rigid loss)
-			- raw_alpha_rigid: Not required here (Will assume no rigid loss)
+			- [x] raw_rgb_rigid: Not required here (Will assume no rigid loss)
+			- [x] raw_alpha_rigid: Not required here (Will assume no rigid loss)
 			- raw_sf_ref2prev: sf = nn.functional.tanh(self.sf_linear(h)) Look at NSFF paper
 			- raw_sf_ref2post: sf = nn.functional.tanh(self.sf_linear(h)) Look at NSFF paper
 				- NOTE: NeRF and NSFF architectures are different model change has to be made here.
