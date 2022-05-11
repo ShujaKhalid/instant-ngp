@@ -1399,6 +1399,67 @@ __global__ void compute_loss_kernel_train_nerf(
 			- z_vals: Distance along the ray for each sample
 	*/
 
+	/*
+		xxx STEP 1: Get maps/data in required format xxx
+		More requirements
+
+		rgb_map_ref
+			- From: raw_2outputs_blending
+		rgb_map_rig
+			- From: raw_2outputs_blending
+		rgb_map_ref_dy
+			- From: raw_2outputs_blending
+		depth_map_ref
+			- From: raw_2outputs_blending
+		depth_map_rig
+			- From: raw_2outputs_blending
+		depth_map_ref_dy
+			- From: raw_2outputs_blending
+		weights_map_dd
+			- From: raw_2outputs_blending (via weights_ref_dd)
+		raw_sf_ref2prev
+			- From: raw and directly from the model
+		raw_sf_ref2post
+			- From: raw and directly from the model
+		raw_pts_ref
+			- From: raw and directly from the model
+		weights_ref_dy
+			- From: raw_2outputs_blending
+		raw_blend_w
+			- From: get_rigid_outputs which we are hoping to avoid altogether
+		raw_sf_prev2ref
+			- From: raw2outputs_warp (t-1)
+		rgb_map_prev_dy
+			- From: raw2outputs_warp (t-1)
+		raw_sf_post2ref
+			- From: raw2outputs_warp (t+1)
+		rgb_map_post_dy
+			- From: raw2outputs_warp (t+1)
+		prob_map_prev
+			- From: from raw_ref via compute_2d_prob 
+		prob_map_post
+			- From: from raw_ref via compute_2d_prob 
+		raw_prob_ref2prev
+			- From: raw_ref
+		raw_prob_ref2post
+			- From raw_ref
+		raw_pts_post
+			- From pts_post
+		raw_pts_prev
+			- From pts_prev
+		raw_pts_pp
+			- From 2 chainz frame loss (IGNORE_FOR NOW)
+		rgb_map_pp_dy
+			- From 2 chainz frame loss (IGNORE FOR NOW)
+	*/
+
+	/*
+		xxx STEP 2: Do the actual loss calculations xxx
+		More requirements
+	*/	
+
+
+
 	if (compacted_numsteps == numsteps) {
 		// support arbitrary background colors
 		rgb_ray += T * background_color;
