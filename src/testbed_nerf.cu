@@ -1403,20 +1403,20 @@ __global__ void compute_loss_kernel_train_nerf(
 		xxx STEP 1: Get maps/data in required format xxx
 		More requirements
 
-		rgb_map_ref
-			- From: raw_2outputs_blending
-		rgb_map_rig
-			- From: raw_2outputs_blending
+		[✓] rgb_map_ref
+			- From: raw2outputs_blending
+		[✓] rgb_map_rig
+			- From: raw2outputs_blending
 		rgb_map_ref_dy
-			- From: raw_2outputs_blending
+			- From: raw2outputs_blending
 		depth_map_ref
-			- From: raw_2outputs_blending
+			- From: raw2outputs_blending
 		depth_map_rig
-			- From: raw_2outputs_blending
+			- From: raw2outputs_blending
 		depth_map_ref_dy
-			- From: raw_2outputs_blending
+			- From: raw2outputs_blending
 		weights_map_dd
-			- From: raw_2outputs_blending (via weights_ref_dd)
+			- From: raw2outputs_blending (via weights_ref_dd)
 		raw_sf_ref2prev
 			- From: raw and directly from the model
 		raw_sf_ref2post
@@ -1442,19 +1442,21 @@ __global__ void compute_loss_kernel_train_nerf(
 		raw_prob_ref2prev
 			- From: raw_ref
 		raw_prob_ref2post
-			- From raw_ref
+			- From: raw_ref
 		raw_pts_post
-			- From pts_post
+			- From: pts_post
 		raw_pts_prev
-			- From pts_prev
+			- From: pts_prev
 		raw_pts_pp
-			- From 2 chainz frame loss (IGNORE_FOR NOW)
+			- From: 2 chainz frame loss (IGNORE_FOR NOW)
 		rgb_map_pp_dy
-			- From 2 chainz frame loss (IGNORE FOR NOW)
+			- From: 2 chainz frame loss (IGNORE FOR NOW)
 	*/
 
 	/*
 		xxx STEP 2: Do the actual loss calculations xxx
+		Once we have everything, this is actually quite trivial.
+		Maybe some CUDA specific complexities, but that's ok...
 		More requirements
 	*/	
 
